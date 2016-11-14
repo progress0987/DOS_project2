@@ -7,6 +7,8 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.ItemEvent;
 import java.awt.event.KeyEvent;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
@@ -15,6 +17,7 @@ import java.io.ObjectOutputStream;
 import java.io.Serializable;
 import java.io.StreamCorruptedException;
 import static java.lang.Thread.sleep;
+import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.Inet4Address;
 import java.net.InetAddress;
@@ -37,6 +40,7 @@ import javax.swing.JList;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPopupMenu;
+import static java.lang.Thread.sleep;
 
 /*
  * To change this license header, choose License Headers in Project Properties.
@@ -53,23 +57,35 @@ public class ChatMain extends javax.swing.JFrame {
      * Creates new form ChatMain
      */
     static String name;
-    static private DatagramSocket locsock;
     static ObjectInputStream in, locin;
     static ObjectOutputStream out, locout;
     static String mygroup;
     static LinkedList packet = new LinkedList();
     static boolean badge = false;
     static int position = -1;
-    static int port;
+    static int port = 5555;
+    static MulticastSocket mcs;
+    static InetAddress local;
 //    static HashMap<String,Integer> matching = new HashMap<String,Integer>();
 //    static LinkedList queue = new LinkedList();
-    static Vector queue = new Vector();
+    static LinkedList queue = new LinkedList();
+    static LinkedList tokenqueue = new LinkedList();
 
     public class Token implements Serializable {
+
         int destination;
         int source;
-        int type;
-        Vector queue;
+        int type; // 0 for broadcast, 1 for require, 2 for passing, 3 for ack
+        int lastjoin;
+        LinkedList queue;
+
+        public int getLastjoin() {
+            return lastjoin;
+        }
+
+        public void setLastjoin(int lastjoin) {
+            this.lastjoin = lastjoin;
+        }
 
         public int getDestination() {
             return destination;
@@ -95,18 +111,29 @@ public class ChatMain extends javax.swing.JFrame {
             this.type = type;
         }
 
-        public Vector getQueue() {
+        public LinkedList getQueue() {
             return queue;
         }
 
-        public void setQueue(Vector queue) {
+        public void setQueue(LinkedList queue) {
             this.queue = queue;
         }
-        
+
     }
 
     public ChatMain(String Name, ObjectInputStream in, ObjectOutputStream out) {
+//        boolean okay = false;
         try {
+//            while (!okay) {
+//                try {
+//                    port = Integer.parseInt(JOptionPane.showInputDialog("Enter your local port"));
+//                    okay = true;
+//                } catch (Exception e) {
+//                    JOptionPane.showMessageDialog(this, "You need to input a number");
+//                    continue;
+//                }
+//            }
+            local = InetAddress.getByName("224.0.0.1");
             this.out = out;
             this.in = in;
             MSGStruct pack = new MSGStruct();
@@ -115,6 +142,8 @@ public class ChatMain extends javax.swing.JFrame {
             pack.setOption(4);
             this.out.writeObject(pack);
             this.out.flush();
+            mcs = new MulticastSocket(5555);
+            mcs.joinGroup(local);
         } catch (IOException io) {
         }
         this.name = Name;
@@ -142,7 +171,7 @@ public class ChatMain extends javax.swing.JFrame {
         jScrollPane3 = new javax.swing.JScrollPane();
         GroupList = new javax.swing.JList<>();
         jScrollPane4 = new javax.swing.JScrollPane();
-        GroupUserDetail = new javax.swing.JList<>();
+        UserList = new javax.swing.JList<>();
         jLabel1 = new javax.swing.JLabel();
         Name = new javax.swing.JLabel();
         jLabel3 = new javax.swing.JLabel();
@@ -152,7 +181,7 @@ public class ChatMain extends javax.swing.JFrame {
         LeaveGroupButton = new javax.swing.JButton();
         JoinGroupButton = new javax.swing.JButton();
         jScrollPane2 = new javax.swing.JScrollPane();
-        UserList = new javax.swing.JList();
+        GroupUser = new javax.swing.JList();
         jLabel2 = new javax.swing.JLabel();
         Acquire_Token = new javax.swing.JButton();
         Send_Token = new javax.swing.JButton();
@@ -205,13 +234,13 @@ public class ChatMain extends javax.swing.JFrame {
         });
         jScrollPane3.setViewportView(GroupList);
 
-        GroupUserDetail.setModel(new javax.swing.AbstractListModel<String>() {
+        UserList.setModel(new javax.swing.AbstractListModel<String>() {
             String[] strings={""};
             public void setStrings(String[] items){this.strings=items;}
             public int getSize() { return strings.length; }
             public String getElementAt(int i) { return strings[i]; }
         });
-        jScrollPane4.setViewportView(GroupUserDetail);
+        jScrollPane4.setViewportView(UserList);
 
         jLabel1.setText("Hello");
 
@@ -219,7 +248,7 @@ public class ChatMain extends javax.swing.JFrame {
 
         jLabel3.setText("Made by SI Kim");
 
-        Dest_Dropdown.setModel(new javax.swing.DefaultComboBoxModel<>(new String[] { "BroadCast","","" }));
+        Dest_Dropdown.setModel(new javax.swing.DefaultComboBoxModel<>(new String[] { "BroadCast","" }));
         Dest_Dropdown.setSelectedIndex(0);
         Dest_Dropdown.setCursor(new java.awt.Cursor(java.awt.Cursor.DEFAULT_CURSOR));
         Dest_Dropdown.addItemListener(new java.awt.event.ItemListener() {
@@ -270,12 +299,12 @@ public class ChatMain extends javax.swing.JFrame {
             }
         });
 
-        UserList.setModel(new javax.swing.AbstractListModel<String>() {
+        GroupUser.setModel(new javax.swing.AbstractListModel<String>() {
             String[] strings = { "" };
             public int getSize() { return strings.length; }
             public String getElementAt(int i) { return strings[i]; }
         });
-        jScrollPane2.setViewportView(UserList);
+        jScrollPane2.setViewportView(GroupUser);
 
         jLabel2.setText("Group User Details");
 
@@ -455,16 +484,7 @@ public class ChatMain extends javax.swing.JFrame {
     private void Acquire_TokenMouseClicked(java.awt.event.MouseEvent evt) {//GEN-FIRST:event_Acquire_TokenMouseClicked
         // TODO add your handling code here:
         if (Acquire_Token.isEnabled()) {
-            MSGStruct send = new MSGStruct();
-            send.setBadge(badge);
-            send.setSender(name);
-            send.setType(2);
-            send.setOption(1);
-            try {
-                out.writeObject(send);
-            } catch (IOException io) {
-
-            }
+            acquiretoken();
             JOptionPane.showMessageDialog(null, "You requested token.");
             Acquire_Token.setEnabled(false);
             Send_Token.setEnabled(false);
@@ -474,21 +494,56 @@ public class ChatMain extends javax.swing.JFrame {
     private void Send_TokenMouseClicked(java.awt.event.MouseEvent evt) {//GEN-FIRST:event_Send_TokenMouseClicked
         // TODO add your handling code here:
         if (Send_Token.isEnabled()) {
-            MSGStruct send = new MSGStruct();
-            send.setBadge(false);
-            send.setSender(name);
-            send.setType(2);
-            send.setOption(2);
-            try {
-                out.writeObject(send);
-            } catch (IOException io) {
-
-            }
+            sendtoken();
             JOptionPane.showMessageDialog(null, "You have send the token.");
             Acquire_Token.setEnabled(true);
             Send_Token.setEnabled(false);
         }
     }//GEN-LAST:event_Send_TokenMouseClicked
+
+    private void acquiretoken() {
+
+        if (!queue.contains(position)) {
+            queue.add(position);
+            System.out.println("q ad");
+            Token pack = new Token();
+            pack.setSource(position);
+            pack.setLastjoin(position);
+            pack.setType(1);
+            pack.setQueue(queue);
+            System.out.println("" + pack.getSource() + pack.getLastjoin() + pack.getType() + pack.getQueue().toString());
+            try {
+                ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                ObjectOutputStream os = new ObjectOutputStream(bos);
+                os.writeObject(pack);
+                byte[] data = bos.toByteArray();
+                System.out.println(data.length);
+                DatagramPacket send = new DatagramPacket(data, data.length, local, port);
+                mcs.send(send);
+            } catch (IOException io) {
+
+            }
+        }
+    }
+
+    private void sendtoken() {
+        Token pack = new Token();
+        pack.setDestination((int) queue.pop());
+        pack.setSource(position);
+        pack.setLastjoin(position);
+        pack.setType(2);
+        pack.setQueue(queue);
+        try {
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            ObjectOutputStream os = new ObjectOutputStream(bos);
+            os.writeObject(pack);
+            byte[] data = bos.toByteArray();
+            DatagramPacket send = new DatagramPacket(data, data.length, local, port);
+            mcs.send(send);
+        } catch (IOException io) {
+
+        }
+    }
 
     /**
      * @param args the command line arguments
@@ -548,7 +603,7 @@ public class ChatMain extends javax.swing.JFrame {
             Send_TokenMouseClicked(null);
             Acquire_Token.setEnabled(false);
         }
-        UserList.setListData(new String[]{""});
+        GroupUser.setListData(new String[]{""});
     }
 
     private void getingroup() {
@@ -569,6 +624,7 @@ public class ChatMain extends javax.swing.JFrame {
             out.writeObject(packet);
         } catch (IOException io) {
         }
+        Acquire_Token.setVisible(true);
     }
 
     private void succnggrp() {
@@ -576,40 +632,7 @@ public class ChatMain extends javax.swing.JFrame {
         Dest_Dropdown.addItem("Broadcast");
         Dest_Dropdown.addItem(mygroup);
         Dest_Dropdown.setSelectedIndex(1);
-
-    }
-
-    private int[] trans(MSGStruct msg) {
-        StringTokenizer st = new StringTokenizer(msg.getMSG());
-        LinkedList temp = new LinkedList();
-        while (st.hasMoreTokens()) {
-            try {
-                temp.add(Integer.parseInt(st.nextToken()));
-            } catch (Exception e) {
-
-            }
-        }
-        int[] ret = new int[temp.size()];
-        for (int i = 0; i < temp.size(); i++) {
-            ret[i] = (int) temp.pop();
-        }
-        return ret;
-    }
-
-    private boolean newest(int[] current, int[] suggest) {
-        if (current.length < suggest.length) {
-            return true;
-        } else {
-            for (int i = 0; i < current.length; i++) {
-                if (current[i] < suggest[i]) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    public void sendtoken() {
+        Acquire_Token.setEnabled(true);
 
     }
 
@@ -696,18 +719,67 @@ public class ChatMain extends javax.swing.JFrame {
 
     private class locrecvthread extends Thread {
 
-        MulticastSocket mcs;
+        public void run() {
+            byte[] indata = new byte[1024];
+            while (true) {
+                try {
+                    DatagramPacket inpack = new DatagramPacket(indata, indata.length);
+                    mcs.receive(inpack);
+                    byte[] data = inpack.getData();
+                    ByteArrayInputStream bin = new ByteArrayInputStream(data);
+                    ObjectInputStream is = new ObjectInputStream(bin);
+                    tokenqueue.add((Token) is.readObject());
+                } catch (IOException io) {
+                } catch (ClassNotFoundException ex) {
+                    System.err.println("packet crashed");
+                }
+            }
+        }
+    }
+
+    private class locprocthread extends Thread {
 
         public void run() {
-            try {
-                mcs = new MulticastSocket(5555);
-                InetAddress local= InetAddress.getByName("224.0.0.1");
-                mcs.joinGroup(local);
-            } catch (IOException ex) {
-                Logger.getLogger(ChatMain.class.getName()).log(Level.SEVERE, null, ex);
-            }
+            Token pop;
             while (true) {
-                
+                if (tokenqueue.size() > 0) {
+                    pop = (Token) tokenqueue.pop();
+                    switch (pop.getType()) {
+                        case 0:
+                        case 1:
+                            queue.add(pop.getSource());
+                            if (!queue.equals(pop.getQueue())) {
+                                queue = pop.getQueue();
+                            }
+                            break;
+                        case 2:
+                            if (pop.destination == position) {
+                                Token pack = new Token();
+                                pack.setSource((int) queue.pop());
+                                pack.setDestination(pop.source);
+                                pack.setLastjoin(position);
+                                pack.setType(3);
+                                pack.setQueue(queue);
+                                try {
+                                    ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                                    ObjectOutputStream os = new ObjectOutputStream(bos);
+                                    os.writeObject(pack);
+                                    byte[] data = bos.toByteArray();
+                                    DatagramPacket send = new DatagramPacket(data, data.length, local, port);
+                                    mcs.send(send);
+                                } catch (IOException io) {
+
+                                }
+                            }
+                            break;
+                        case 3:
+                            if (pop.getDestination() == position) {
+                                badge = false;
+                            } else if (pop.getSource() == ((Token) queue.getFirst()).source) {
+                                queue.pop();
+                            }
+                    }// 0 for broadcast, 1 for require, 2 for sending, 3 for ack
+                }
             }
         }
     }
@@ -763,6 +835,7 @@ public class ChatMain extends javax.swing.JFrame {
                                     break;
                                 case 1:
                                     JOptionPane.showMessageDialog(null, msg.getMSG());
+                                    badge = true;
                                     succrtgrp(msg.getGroupName());
                                     break;
                                 case 2:
@@ -779,7 +852,7 @@ public class ChatMain extends javax.swing.JFrame {
                                     while (sto.hasMoreTokens()) {
                                         lists[j++] = sto.nextToken();
                                     }
-                                    UserList.setListData(lists);
+                                    GroupUser.setListData(lists);
                                     break;
                                 case 4:
                                     break;
@@ -794,13 +867,12 @@ public class ChatMain extends javax.swing.JFrame {
                                     StringTokenizer st;
                                     String[] items;
                                     st = new StringTokenizer(msg.getMSG());
-                                    items = new String[st.countTokens() / 3];
+                                    items = new String[st.countTokens()];
                                     int i = 0;
                                     while (st.hasMoreTokens()) {
-                                        String temp = st.nextToken() + "\t" + st.nextToken() + " : " + st.nextToken();
-                                        items[i++] = temp;
+                                        items[i++] = st.nextToken();
                                     }
-                                    GroupUserDetail.setListData(items);
+                                    UserList.setListData(items);
                                     break;
                                 case 4:
                                     position = Integer.parseInt(msg.getMSG());
@@ -823,13 +895,13 @@ public class ChatMain extends javax.swing.JFrame {
     private javax.swing.JButton CreateGroupButton;
     private static javax.swing.JComboBox Dest_Dropdown;
     protected static javax.swing.JList GroupList;
-    protected static javax.swing.JList GroupUserDetail;
+    private javax.swing.JList GroupUser;
     private javax.swing.JButton JoinGroupButton;
     private javax.swing.JButton LeaveGroupButton;
     private javax.swing.JLabel Name;
     private javax.swing.JButton Send;
     private javax.swing.JButton Send_Token;
-    private javax.swing.JList UserList;
+    protected static javax.swing.JList UserList;
     private javax.swing.JLabel jLabel1;
     private javax.swing.JLabel jLabel2;
     private javax.swing.JLabel jLabel3;
