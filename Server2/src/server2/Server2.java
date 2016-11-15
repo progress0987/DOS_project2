@@ -39,7 +39,7 @@ public class Server2 {
     private static LinkedList queue = new LinkedList();
     private static HashMap<String, Clientconnection> logedlist = new HashMap<String, Clientconnection>();
     private static HashMap<String, Group> grouplist = new HashMap<String, Group>();
-    static int index=0;
+    static int index = 0;
 
     public static void main(String[] args) throws IOException {
 //        Scanner scan = new Scanner(System.in);
@@ -68,7 +68,7 @@ public class Server2 {
             }
             MSGStruct newmsg = new MSGStruct();
             newmsg.setMSG(temp);
-            newmsg.setType(1);
+            newmsg.setType(2);
             newmsg.setOption(3);
             for (Clientconnection t : logedlist.values()) {
                 if (t == null) {
@@ -101,23 +101,16 @@ public class Server2 {
                 return;
             }
             MSGStruct newmsg = new MSGStruct();
-            MSGStruct queuemsg = new MSGStruct();
             String temp = "";
-            String temp2 = "";
             for (String k : grouplist.get(groupname).getmemberlist()) {
                 temp = temp + k + "\t";
-                temp2 = temp2 + k + "\t  " + logedlist.get(k).sock.getInetAddress() + "\t" + logedlist.get(k).sock.getPort() + "\t";
             }
             newmsg.setMSG(temp);
             newmsg.setType(1);
             newmsg.setOption(3);
-            queuemsg.setMSG(temp2);
-            queuemsg.setType(2);
-            queuemsg.setOption(3);
             for (String k : grouplist.get(groupname).getmemberlist()) {
                 if (logedlist.containsKey(k)) {
                     queue.add(new QStruct(newmsg, logedlist.get(k)));
-                    queue.add(new QStruct(queuemsg, logedlist.get(k)));
                 }
             }
         }
@@ -201,11 +194,30 @@ public class Server2 {
                                 }
                             } else if (packet.getOption() == 4) {
                                 logedlist.put(packet.getSender(), cli);
-                                packet.setMSG(""+index++);
-                                System.out.println("index="+(index-1));
+                                packet.setMSG("" + index++);
+                                System.out.println("index=" + (index - 1));
                                 System.out.println("id : " + packet.getSender() + "\tSocket : " + cli.sock + " is registered");
                                 refreshuser();
                                 refreshgroup();
+                            } else if (packet.getOption() == 5) {
+                                for (String t : logedlist.keySet()) {
+                                    if (logedlist.get(t).equals(cli)) {
+                                        logedlist.get(t).close();
+                                        logedlist.remove(t);
+                                        for (Group g : grouplist.values()) {
+                                            if (g.hasMember(t)) {
+                                                g.removeMember(t);
+                                                break;
+                                            }
+                                        }
+                                        break;
+                                    }
+                                }
+                                if (logedlist.size() > 0) {
+                                    refreshuser();
+                                    refreshgroup();
+                                }
+                                break;
                             }
                             packet.setRecieve(packet.getSender());
                             packet.setSender("Server");
@@ -263,7 +275,15 @@ public class Server2 {
                                 }
                             } else if (msg.getOption() == 2) {
                                 String grpname = msg.getGroupName();
-                                if (grouplist.containsKey(grpname)) {
+                                if (!msg.getBadge()) {
+                                    MSGStruct send = new MSGStruct();
+                                    send.setBadge(false);
+                                    send.setType(0);
+                                    send.setOption(-1);
+                                    send.setSender("Server");
+                                    send.setMSG("You need to acquire token first");
+                                    qs.cli.out().writeObject(send);
+                                } else if (grouplist.containsKey(grpname)) {
                                     Group tempg = grouplist.get(grpname);
                                     for (String t : tempg.getmemberlist()) {
                                         if (logedlist.containsKey(t)) {
