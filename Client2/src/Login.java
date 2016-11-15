@@ -240,9 +240,11 @@ public class Login extends javax.swing.JFrame {
         Login_button.setEnabled(true);
     }
 
-
     public void login() {
         try {
+            if (ID_Field.getText().equals("")) {
+                return;
+            }
             MSGStruct msg = new MSGStruct();
             msg.setType(2);
             msg.setOption(0);
