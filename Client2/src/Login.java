@@ -89,6 +89,7 @@ public class Login extends javax.swing.JFrame {
 
         jLabel4.setText("Server IP");
 
+        IP.setText("127.0.0.1");
         IP.addKeyListener(new java.awt.event.KeyAdapter() {
             public void keyPressed(java.awt.event.KeyEvent evt) {
                 IPKeyPressed(evt);
