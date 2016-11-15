@@ -59,8 +59,8 @@ public class ChatMain extends javax.swing.JFrame {
      * Creates new form ChatMain
      */
     static String name;
-    static ObjectInputStream in, locin;
-    static ObjectOutputStream out, locout;
+    static ObjectInputStream in;
+    static ObjectOutputStream out;
     static String mygroup;
     static LinkedList packet = new LinkedList();
     static boolean badge = false;
@@ -572,6 +572,7 @@ public class ChatMain extends javax.swing.JFrame {
             pack.setType(1);
             pack.setQueue(queue);
             try {
+                sock=new DatagramSocket();
                 ByteArrayOutputStream bos = new ByteArrayOutputStream();
                 ObjectOutputStream os = new ObjectOutputStream(bos);
                 os.writeObject(pack);
