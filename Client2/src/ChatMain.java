@@ -41,6 +41,8 @@ import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPopupMenu;
 import static java.lang.Thread.sleep;
+import static java.lang.Thread.sleep;
+import static java.lang.Thread.sleep;
 
 /*
  * To change this license header, choose License Headers in Project Properties.
@@ -62,13 +64,15 @@ public class ChatMain extends javax.swing.JFrame {
     static String mygroup;
     static LinkedList packet = new LinkedList();
     static boolean badge = false;
-    static int position = -1;
+    static int id = -1;
+    static int last=0;
     static int port = 5555;
     static MulticastSocket mcs;
+    static DatagramSocket sock;
     static InetAddress local;
 //    static HashMap<String,Integer> matching = new HashMap<String,Integer>();
 //    static LinkedList queue = new LinkedList();
-    static LinkedList queue = new LinkedList();
+    static int[] queue = new int[5];
     static LinkedList tokenqueue = new LinkedList();
 
     public class Token implements Serializable {
@@ -76,16 +80,17 @@ public class ChatMain extends javax.swing.JFrame {
         int destination;
         int source;
         int type; // 0 for broadcast, 1 for require, 2 for passing, 3 for ack
-        int lastjoin;
-        LinkedList queue;
+        int lastindex;
+        int[] queue = new int[5];
 
-        public int getLastjoin() {
-            return lastjoin;
+        public int getLastindex() {
+            return lastindex;
         }
 
-        public void setLastjoin(int lastjoin) {
-            this.lastjoin = lastjoin;
+        public void setLastindex(int lastindex) {
+            this.lastindex = lastindex;
         }
+
 
         public int getDestination() {
             return destination;
@@ -111,15 +116,52 @@ public class ChatMain extends javax.swing.JFrame {
             this.type = type;
         }
 
-        public LinkedList getQueue() {
+        public int[] getQueue() {
             return queue;
         }
 
-        public void setQueue(LinkedList queue) {
+        public void setQueue(int[] queue) {
             this.queue = queue;
         }
-
+        private int pop(){
+            int ret=0;
+            if(queue[0]>0){
+                ret=queue[0];
+                for(int i=0;i<queue.length;i++){
+                    int j=i+1;
+                    queue[i]=queue[j];
+                    if(j+1<queue.length&&j+1==0){
+                        queue[j]=0;
+                        break;
+                    }    
+                    if(queue[i]<=0)
+                        break;
+                    if(j>queue.length)
+                        break;
+                }
+            }
+            return ret;
+        }
     }
+        private int pop(){
+            int ret=0;
+            if(queue[0]>0){
+                ret=queue[0];
+                for(int i=0;i<queue.length;i++){
+                    int j=i+1;
+                    queue[i]=queue[j];
+                    if(j+1<queue.length&&j+1==0){
+                        queue[j]=0;
+                        break;
+                    }    
+                    if(queue[i]<=0)
+                        break;
+                    if(j>queue.length)
+                        break;
+                }
+            }
+            return ret;
+        }
 
     public ChatMain(String Name, ObjectInputStream in, ObjectOutputStream out) {
 //        boolean okay = false;
@@ -134,6 +176,7 @@ public class ChatMain extends javax.swing.JFrame {
 //                }
 //            }
             local = InetAddress.getByName("224.0.0.1");
+            sock = new DatagramSocket();
             this.out = out;
             this.in = in;
             MSGStruct pack = new MSGStruct();
@@ -501,25 +544,40 @@ public class ChatMain extends javax.swing.JFrame {
         }
     }//GEN-LAST:event_Send_TokenMouseClicked
 
+    private void addqueue(int i){
+        if(last>queue.length)
+            return;
+        queue[last++]=i;
+    }
+    private boolean equal(int[] a, int[]b){
+        boolean ret=true;
+        for(int i=0;i<a.length;i++){
+            if(a[i]!=b[i])
+                ret=false;
+        }
+        return ret;
+    }
     private void acquiretoken() {
-
-        if (!queue.contains(position)) {
-            queue.add(position);
+        boolean contains=false;
+        for(int i=0;i<queue.length;i++){
+            if(queue[i]==id)
+                contains=true;
+        }
+        if (!contains) {
+            queue[last++]=id;
             System.out.println("q ad");
             Token pack = new Token();
-            pack.setSource(position);
-            pack.setLastjoin(position);
+            pack.setSource(id);
+            pack.setLastindex(last);
             pack.setType(1);
             pack.setQueue(queue);
-            System.out.println("" + pack.getSource() + pack.getLastjoin() + pack.getType() + pack.getQueue().toString());
             try {
                 ByteArrayOutputStream bos = new ByteArrayOutputStream();
                 ObjectOutputStream os = new ObjectOutputStream(bos);
                 os.writeObject(pack);
                 byte[] data = bos.toByteArray();
-                System.out.println(data.length);
                 DatagramPacket send = new DatagramPacket(data, data.length, local, port);
-                mcs.send(send);
+                sock.send(send);
             } catch (IOException io) {
 
             }
@@ -528,18 +586,18 @@ public class ChatMain extends javax.swing.JFrame {
 
     private void sendtoken() {
         Token pack = new Token();
-        pack.setDestination((int) queue.pop());
-        pack.setSource(position);
-        pack.setLastjoin(position);
-        pack.setType(2);
         pack.setQueue(queue);
+        pack.setDestination(pop());
+        pack.setSource(id);
+        pack.setLastindex(--last);
+        pack.setType(2);
         try {
             ByteArrayOutputStream bos = new ByteArrayOutputStream();
             ObjectOutputStream os = new ObjectOutputStream(bos);
             os.writeObject(pack);
             byte[] data = bos.toByteArray();
             DatagramPacket send = new DatagramPacket(data, data.length, local, port);
-            mcs.send(send);
+            sock.send(send);
         } catch (IOException io) {
 
         }
@@ -747,36 +805,44 @@ public class ChatMain extends javax.swing.JFrame {
                     switch (pop.getType()) {
                         case 0:
                         case 1:
-                            queue.add(pop.getSource());
-                            if (!queue.equals(pop.getQueue())) {
+                            addqueue(pop.getSource());
+                            
+                            if (pop.getLastindex()>last) {
                                 queue = pop.getQueue();
+                                last = pop.getLastindex();
                             }
                             break;
                         case 2:
-                            if (pop.destination == position) {
+                            if (pop.destination == id) {
+                                badge=true;
+                                last=pop.getLastindex();
+                                queue=pop.getQueue();
                                 Token pack = new Token();
-                                pack.setSource((int) queue.pop());
-                                pack.setDestination(pop.source);
-                                pack.setLastjoin(position);
-                                pack.setType(3);
                                 pack.setQueue(queue);
+                                pack.setSource(id);
+                                pack.setDestination(pop.source);
+                                pack.setType(3);
                                 try {
                                     ByteArrayOutputStream bos = new ByteArrayOutputStream();
                                     ObjectOutputStream os = new ObjectOutputStream(bos);
                                     os.writeObject(pack);
                                     byte[] data = bos.toByteArray();
                                     DatagramPacket send = new DatagramPacket(data, data.length, local, port);
-                                    mcs.send(send);
+                                    sock.send(send);
                                 } catch (IOException io) {
 
                                 }
                             }
                             break;
                         case 3:
-                            if (pop.getDestination() == position) {
+                            if (pop.getDestination() == id) {
                                 badge = false;
-                            } else if (pop.getSource() == ((Token) queue.getFirst()).source) {
-                                queue.pop();
+                                if(!(last<=pop.getLastindex()))
+                                    last=pop.getLastindex();
+                                Acquire_Token.setEnabled(true);
+                                Send_Token.setEnabled(badge);
+                            } else if (pop.getSource() == queue[0]) {
+                                queue=pop.getQueue();
                             }
                     }// 0 for broadcast, 1 for require, 2 for sending, 3 for ack
                 }
@@ -875,7 +941,7 @@ public class ChatMain extends javax.swing.JFrame {
                                     UserList.setListData(items);
                                     break;
                                 case 4:
-                                    position = Integer.parseInt(msg.getMSG());
+                                    id = Integer.parseInt(msg.getMSG());
                                     break;
                             }
                             break;
