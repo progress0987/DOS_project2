@@ -3,6 +3,7 @@ import com.sun.corba.se.impl.io.IIOPInputStream;
 import com.sun.corba.se.impl.io.OutputStreamHook;
 import server2.MSG.MSGStruct;
 import com.sun.glass.events.MouseEvent;
+import java.awt.Color;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.ItemEvent;
@@ -43,6 +44,8 @@ import javax.swing.JPopupMenu;
 import static java.lang.Thread.sleep;
 import static java.lang.Thread.sleep;
 import static java.lang.Thread.sleep;
+import java.util.NoSuchElementException;
+import server2.MSG.Token;
 
 /*
  * To change this license header, choose License Headers in Project Properties.
@@ -65,116 +68,18 @@ public class ChatMain extends javax.swing.JFrame {
     static LinkedList packet = new LinkedList();
     static boolean badge = false;
     static int id = -1;
-    static int last=0;
+    static int last = 0;
     static int port = 5555;
     static MulticastSocket mcs;
     static DatagramSocket sock;
     static InetAddress local;
 //    static HashMap<String,Integer> matching = new HashMap<String,Integer>();
 //    static LinkedList queue = new LinkedList();
-    static int[] queue = new int[5];
+    static LinkedList queue = new LinkedList();
     static LinkedList tokenqueue = new LinkedList();
 
-    public class Token implements Serializable {
-
-        int destination;
-        int source;
-        int type; // 0 for broadcast, 1 for require, 2 for passing, 3 for ack
-        int lastindex;
-        int[] queue = new int[5];
-
-        public int getLastindex() {
-            return lastindex;
-        }
-
-        public void setLastindex(int lastindex) {
-            this.lastindex = lastindex;
-        }
-
-
-        public int getDestination() {
-            return destination;
-        }
-
-        public void setDestination(int destination) {
-            this.destination = destination;
-        }
-
-        public int getSource() {
-            return source;
-        }
-
-        public void setSource(int source) {
-            this.source = source;
-        }
-
-        public int getType() {
-            return type;
-        }
-
-        public void setType(int type) {
-            this.type = type;
-        }
-
-        public int[] getQueue() {
-            return queue;
-        }
-
-        public void setQueue(int[] queue) {
-            this.queue = queue;
-        }
-        private int pop(){
-            int ret=0;
-            if(queue[0]>0){
-                ret=queue[0];
-                for(int i=0;i<queue.length;i++){
-                    int j=i+1;
-                    queue[i]=queue[j];
-                    if(j+1<queue.length&&j+1==0){
-                        queue[j]=0;
-                        break;
-                    }    
-                    if(queue[i]<=0)
-                        break;
-                    if(j>queue.length)
-                        break;
-                }
-            }
-            return ret;
-        }
-    }
-        private int pop(){
-            int ret=0;
-            if(queue[0]>0){
-                ret=queue[0];
-                for(int i=0;i<queue.length;i++){
-                    int j=i+1;
-                    queue[i]=queue[j];
-                    if(j+1<queue.length&&j+1==0){
-                        queue[j]=0;
-                        break;
-                    }    
-                    if(queue[i]<=0)
-                        break;
-                    if(j>queue.length)
-                        break;
-                }
-            }
-            return ret;
-        }
-
     public ChatMain(String Name, ObjectInputStream in, ObjectOutputStream out) {
-//        boolean okay = false;
         try {
-//            while (!okay) {
-//                try {
-//                    port = Integer.parseInt(JOptionPane.showInputDialog("Enter your local port"));
-//                    okay = true;
-//                } catch (Exception e) {
-//                    JOptionPane.showMessageDialog(this, "You need to input a number");
-//                    continue;
-//                }
-//            }
             local = InetAddress.getByName("224.0.0.1");
             sock = new DatagramSocket();
             this.out = out;
@@ -191,10 +96,12 @@ public class ChatMain extends javax.swing.JFrame {
         }
         this.name = Name;
         initComponents();
+        Send.setBackground(Color.RED);
         this.Name.setText(name);
         new recvthread().start();
-        new locrecvthread().start();
+//        new locrecvthread().start();
         new procthread().start();
+        new locprocthread().start();
 //        new refthread().start();
     }
 
@@ -492,6 +399,9 @@ public class ChatMain extends javax.swing.JFrame {
         // TODO add your handling code here:
         MSGStruct pack = new MSGStruct();
         pack.setSender(name);
+        if (!Dest_Dropdown.getItemAt(1).toString().equals("")) {
+            pack.setGroupName(Dest_Dropdown.getItemAt(1).toString());
+        }
         pack.setType(2);
         pack.setOption(5);
         try {
@@ -537,58 +447,45 @@ public class ChatMain extends javax.swing.JFrame {
     private void Send_TokenMouseClicked(java.awt.event.MouseEvent evt) {//GEN-FIRST:event_Send_TokenMouseClicked
         // TODO add your handling code here:
         if (Send_Token.isEnabled()) {
-            sendtoken();
-            JOptionPane.showMessageDialog(null, "You have send the token.");
-            Acquire_Token.setEnabled(true);
-            Send_Token.setEnabled(false);
+            if (sendtoken()) {
+                Acquire_Token.setEnabled(true);
+                Send_Token.setEnabled(false);
+            }
         }
     }//GEN-LAST:event_Send_TokenMouseClicked
 
-    private void addqueue(int i){
-        if(last>queue.length)
-            return;
-        queue[last++]=i;
-    }
-    private boolean equal(int[] a, int[]b){
-        boolean ret=true;
-        for(int i=0;i<a.length;i++){
-            if(a[i]!=b[i])
-                ret=false;
-        }
-        return ret;
-    }
     private void acquiretoken() {
-        boolean contains=false;
-        for(int i=0;i<queue.length;i++){
-            if(queue[i]==id)
-                contains=true;
-        }
-        if (!contains) {
-            queue[last++]=id;
-            System.out.println("q ad");
+        if (!queue.contains(id)) {
+            queue.add(id);
             Token pack = new Token();
             pack.setSource(id);
-            pack.setLastindex(last);
+            pack.setLastindex(++last);
             pack.setType(1);
             pack.setQueue(queue);
             try {
-                sock=new DatagramSocket();
                 ByteArrayOutputStream bos = new ByteArrayOutputStream();
                 ObjectOutputStream os = new ObjectOutputStream(bos);
                 os.writeObject(pack);
                 byte[] data = bos.toByteArray();
                 DatagramPacket send = new DatagramPacket(data, data.length, local, port);
                 sock.send(send);
+                System.out.println("token acquired");
             } catch (IOException io) {
 
             }
         }
     }
 
-    private void sendtoken() {
+    private boolean sendtoken() {
         Token pack = new Token();
+        System.out.println(queue.toString());
+        try {
+            pack.setDestination((int) queue.pop());
+        } catch (NoSuchElementException see) {
+            JOptionPane.showMessageDialog(null, "Queue is empty you cant send a token");
+            return false;
+        }
         pack.setQueue(queue);
-        pack.setDestination(pop());
         pack.setSource(id);
         pack.setLastindex(--last);
         pack.setType(2);
@@ -599,9 +496,12 @@ public class ChatMain extends javax.swing.JFrame {
             byte[] data = bos.toByteArray();
             DatagramPacket send = new DatagramPacket(data, data.length, local, port);
             sock.send(send);
+            System.out.println("Token sent");
         } catch (IOException io) {
 
         }
+        JOptionPane.showMessageDialog(null, "You have send the token.");
+        return true;
     }
 
     /**
@@ -638,6 +538,7 @@ public class ChatMain extends javax.swing.JFrame {
         badge = true;
         Acquire_Token.setEnabled(false);
         Send_Token.setEnabled(true);
+        Send.setBackground(Color.green);
     }
 
     private void leavegroup() {
@@ -776,52 +677,57 @@ public class ChatMain extends javax.swing.JFrame {
         }
     }
 
-    private class locrecvthread extends Thread {
-
-        public void run() {
-            byte[] indata = new byte[1024];
-            while (true) {
-                try {
-                    DatagramPacket inpack = new DatagramPacket(indata, indata.length);
-                    mcs.receive(inpack);
-                    byte[] data = inpack.getData();
-                    ByteArrayInputStream bin = new ByteArrayInputStream(data);
-                    ObjectInputStream is = new ObjectInputStream(bin);
-                    tokenqueue.add((Token) is.readObject());
-                } catch (IOException io) {
-                } catch (ClassNotFoundException ex) {
-                    System.err.println("packet crashed");
-                }
-            }
-        }
-    }
-
     private class locprocthread extends Thread {
 
         public void run() {
             Token pop;
+            byte[] indata = new byte[1024];
+//            int t = 0;
             while (true) {
+                try {
+                    sleep(50);
+                } catch (InterruptedException ie) {
+
+                }
+                try {
+                    DatagramPacket inpack = new DatagramPacket(indata, indata.length);
+                    mcs.receive(inpack);
+                    System.out.println("recieved");
+                    byte[] data = inpack.getData();
+                    ByteArrayInputStream bin = new ByteArrayInputStream(data);
+                    ObjectInputStream is = new ObjectInputStream(bin);
+                    Token rec = new Token();
+                    rec = (Token) is.readObject();
+                    System.out.println("packet from " + rec.getSource() + " to " + rec.getDestination() + " type :" + rec.getType() + " last index : " + rec.getLastindex() + " and queue is " + rec.getQueue().toString());
+                    tokenqueue.add(rec);
+                    System.out.println("token added " + tokenqueue.size());
+                } catch (IOException io) {
+                } catch (ClassNotFoundException ex) {
+                    System.err.println("packet crashed");
+                }
                 if (tokenqueue.size() > 0) {
                     pop = (Token) tokenqueue.pop();
                     switch (pop.getType()) {
                         case 0:
                         case 1:
-                            addqueue(pop.getSource());
-                            
-                            if (pop.getLastindex()>last) {
+                            if (pop.getSource() == id) {
+                                break;
+                            }
+                            System.out.println("ID : " + id + " got LI" + pop.getLastindex());
+                            if (pop.getLastindex() > last) {
                                 queue = pop.getQueue();
                                 last = pop.getLastindex();
                             }
                             break;
                         case 2:
-                            if (pop.destination == id) {
-                                badge=true;
-                                last=pop.getLastindex();
-                                queue=pop.getQueue();
+                            if (pop.getDestination() == id) {
+                                badge = true;
+                                last = pop.getLastindex();
+                                queue = pop.getQueue();
                                 Token pack = new Token();
                                 pack.setQueue(queue);
                                 pack.setSource(id);
-                                pack.setDestination(pop.source);
+                                pack.setDestination(pop.getSource());
                                 pack.setType(3);
                                 try {
                                     ByteArrayOutputStream bos = new ByteArrayOutputStream();
@@ -833,17 +739,21 @@ public class ChatMain extends javax.swing.JFrame {
                                 } catch (IOException io) {
 
                                 }
+                                Send.setBackground(Color.green);
+                                Send_Token.setEnabled(true);
                             }
                             break;
                         case 3:
                             if (pop.getDestination() == id) {
                                 badge = false;
-                                if(!(last<=pop.getLastindex()))
-                                    last=pop.getLastindex();
+                                if (!(last <= pop.getLastindex())) {
+                                    last = pop.getLastindex();
+                                }
                                 Acquire_Token.setEnabled(true);
                                 Send_Token.setEnabled(badge);
-                            } else if (pop.getSource() == queue[0]) {
-                                queue=pop.getQueue();
+                                Send.setBackground(Color.red);
+                            } else if (queue.size() > 0 && pop.getSource() == (int) queue.getFirst()) {
+                                queue = pop.getQueue();
                             }
                     }// 0 for broadcast, 1 for require, 2 for sending, 3 for ack
                 }
@@ -861,11 +771,9 @@ public class ChatMain extends javax.swing.JFrame {
                 }
                 if (!packet.isEmpty()) {
                     MSGStruct msg = (MSGStruct) packet.pop();
-                    System.out.println("Queue is handled");
                     if (msg == null) {
                         continue;
                     }
-                    System.out.println(msg.getType() + " : " + msg.getOption());
                     switch (msg.getType()) {
                         case 0:
                             switch (msg.getOption()) {
