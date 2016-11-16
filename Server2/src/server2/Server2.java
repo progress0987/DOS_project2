@@ -216,6 +216,9 @@ public class Server2 {
                                 if (logedlist.size() > 0) {
                                     refreshuser();
                                     refreshgroup();
+                                    if (packet.getGroupName()!= null || !packet.getGroupName().equals("")) {
+                                        refreshGmembers(packet.getGroupName());
+                                    }
                                 }
                                 break;
                             }
